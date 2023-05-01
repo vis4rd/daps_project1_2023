@@ -19,19 +19,27 @@ if(NOT EXISTS "${PROJECT_SOURCE_DIR}/bin" OR NOT IS_DIRECTORY "${PROJECT_SOURCE_
     file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 endif()
 
-add_executable(daps_project1)
-set_target_properties(daps_project1 PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
-target_sources(daps_project1 PRIVATE "${PROJECT_SOURCE_DIR}/main.cpp")
-target_compile_definitions(daps_project1 PRIVATE "-DUSE_MPI")
-target_compile_features(daps_project1 PRIVATE c_std_23 cxx_std_20)
-target_include_directories(daps_project1 PRIVATE "${MPICH_INCLUDE_PATH}")
-target_link_directories(daps_project1 PRIVATE "${MPICH_LIBRARY_PATH}")
-target_link_libraries(daps_project1 PRIVATE m mpi)
+add_executable(fft_parallel)
+set_target_properties(fft_parallel PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
+target_sources(fft_parallel PRIVATE "${PROJECT_SOURCE_DIR}/fft_parallel.cpp")
+target_compile_definitions(fft_parallel PRIVATE "-DUSE_MPI")
+target_compile_features(fft_parallel PRIVATE c_std_23 cxx_std_20)
+target_include_directories(fft_parallel PRIVATE "${MPICH_INCLUDE_PATH}")
+target_link_directories(fft_parallel PRIVATE "${MPICH_LIBRARY_PATH}")
+target_link_libraries(fft_parallel PRIVATE m mpi)
 
-add_custom_target(run ${MPICH_RUNNER} -f nodes -n 16 $<TARGET_FILE:daps_project1>)
+add_custom_target(run ${MPICH_RUNNER} -f nodes -n 16 $<TARGET_FILE:fft_parallel>)
 add_custom_command(
-    TARGET daps_project1 PRE_BUILD
+    TARGET fft_parallel PRE_BUILD
     COMMAND /opt/nfs/config/station204_name_list.sh
     ARGS 1 16 > ${PARALLEL_TARGETS_FILE}
     COMMENT "Generating parallel targets file: '${PARALLEL_TARGETS_FILE}'"
 )
+
+###
+
+add_executable(fft_sequential)
+set_target_properties(fft_sequential PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
+target_sources(fft_sequential PRIVATE "${PROJECT_SOURCE_DIR}/fft_sequential.c")
+target_compile_features(fft_sequential PRIVATE c_std_23 cxx_std_20)
+target_link_libraries(fft_sequential PRIVATE m)
