@@ -4,8 +4,7 @@
             "name": "Linux",
             "includePath": [
                 "${default}",
-                "/opt/nfs/mpich-4.0.1/include",
-                "/opt/nfs/sprng5/include"
+                "/opt/nfs/mpich-4.0.1/include"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",

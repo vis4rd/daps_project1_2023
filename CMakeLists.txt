@@ -30,7 +30,7 @@ target_link_libraries(daps_project1 PRIVATE m mpi)
 
 add_custom_target(run ${MPICH_RUNNER} -f nodes -n 16 $<TARGET_FILE:daps_project1>)
 add_custom_command(
-    TARGET daps_project1 POST_BUILD
+    TARGET daps_project1 PRE_BUILD
     COMMAND /opt/nfs/config/station204_name_list.sh
     ARGS 1 16 > ${PARALLEL_TARGETS_FILE}
     COMMENT "Generating parallel targets file: '${PARALLEL_TARGETS_FILE}'"

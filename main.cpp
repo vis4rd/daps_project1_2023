@@ -1,9 +1,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 #include <mpi.h>
-
-#define PI 3.14159265
 
 struct Complex
 {
@@ -29,118 +28,118 @@ int reverseBits(int number, int NO_OF_BITS)
 
 int main(int argc, char **argv)
 {
-    int rank;
-    int size;
-    int num;
-    int key;
-    int div;
-    double bb1time;
-    double ab1time;
-    double bb2time;
-    double ab2time;
-    double starttime;
-    double endtime;
-
     MPI_Status status;
 
     MPI_Init(&argc, &argv);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    MPI_Datatype num1type;
-    MPI_Datatype type[2] = {MPI_FLOAT, MPI_FLOAT};
-
-    int blocklen[2] = {4, 4};
-
-    MPI_Aint disp[2];
-
-    if (rank == 0)
+    const int process_count = []() -> int
     {
-        std::printf("Enter No. of input values(it should be in form of 2^x) : ");
-        std::scanf("%d", &num);
-    }
+        int process_count{};
+        MPI_Comm_size(MPI_COMM_WORLD, &process_count);
+        return process_count;
+    }();
 
-    bb1time = MPI_Wtime();
-    MPI_Bcast(&num, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    ab1time = MPI_Wtime();
+    const int rank = []() -> int
+    {
+        int rank{};
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        return rank;
+    }();
 
-    Complex input[num + 1];
-    Complex seq[num + 1];
-    Complex temp[num + 1];
+    double bb1time{};
+    double ab1time{};
+    const int input_values_count = [&bb1time, &ab1time, &rank]() -> int
+    {
+        int input_values_count{};
+        if (rank == 0)
+        {
+            std::printf("Enter No. of input values(it should be in form of 2^x) : ");
+            std::scanf("%d", &input_values_count);
+        }
+        bb1time = MPI_Wtime();
+        MPI_Bcast(&input_values_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        ab1time = MPI_Wtime();
+        return input_values_count;
+    }();
 
-    input[0].real = 0.0;
-    input[0].img = 0.0;
+    std::vector<Complex> input_values(input_values_count + 1);
+    Complex seq[input_values_count + 1]{};
+    Complex temp[input_values_count + 1]{};
+
+    input_values[0].real = 0.0;
+    input_values[0].img = 0.0;
     seq[0].real = 0.0;
     seq[0].img = 0.0;
     temp[0].real = 0.0;
     temp[0].img = 0.0;
 
-    disp[0] = 0;
-    disp[1] = 4;
+    MPI_Datatype MPI_COMPLEX_T;
 
-    MPI_Type_create_struct(2, blocklen, disp, type, &num1type);
-    MPI_Type_commit(&num1type);
+    MPI_Type_create_struct(
+        sizeof(Complex) / sizeof(float),
+        (const int[2]){sizeof(float), sizeof(float)},
+        (const MPI_Aint[2]){0, 4},
+        (const MPI_Datatype[2]){MPI_FLOAT, MPI_FLOAT},
+        &MPI_COMPLEX_T);
+    MPI_Type_commit(&MPI_COMPLEX_T);
 
     if (rank == 0)
     {
-        std::printf("Enter total %d values in floating point formet(separated with space) : ", num);
+        std::printf("Enter total %d values in floating point formet(separated with space) : ", input_values_count);
 
-        for (int i = 1; i < num + 1; i++)
+        for (int i = 1; i < input_values_count + 1; i++)
         {
-            std::scanf("%f", &input[i].real);
-            input[i].img = 0.0;
+            std::scanf("%f", &input_values[i].real);
+            input_values[i].img = 0.0;
         }
 
-        for (int i = 1; i < num + 1; i++)
+        for (int i = 1; i < input_values_count + 1; i++)
         {
-            seq[i].real = input[reverseBits(i - 1, std::log2f(num) / std::log2f(2)) + 1].real; // log2 (x) = logy (x) / logy (2)
+            seq[i].real = input_values[reverseBits(i - 1, std::log2f(input_values_count) / std::log2f(2)) + 1].real; // log2 (x) = logy (x) / logy (2)
             seq[i].img = 0.0;
         }
     }
 
-    bb2time = MPI_Wtime();
-    MPI_Bcast(seq, num + 1, num1type, 0, MPI_COMM_WORLD);
-    ab2time = MPI_Wtime();
+    const double bb2time = MPI_Wtime();
+    MPI_Bcast(seq, input_values_count + 1, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
+    const double ab2time = MPI_Wtime();
 
-    key = std::log2f(num);
-    div = 1;
+    const double starttime = MPI_Wtime();
 
-    starttime = MPI_Wtime();
-
-    while (key--)
+    for (int div = 1, key = std::log2f(input_values_count); key > 0; key--)
     {
         if (rank != 0)
         {
             if (((rank + div - 1) / div) % 2 == 0)
             {
                 temp[rank].real = seq[rank - div].real +
-                                  (std::cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].real)) +
-                                  (std::sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].img));
+                                  (std::cos(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].real)) +
+                                  (std::sin(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].img));
 
                 temp[rank].img = seq[rank - div].img +
-                                 (std::cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].img)) -
-                                 (std::sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].real));
+                                 (std::cos(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].img)) -
+                                 (std::sin(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].real));
 
-                MPI_Send(&temp[rank], 1, num1type, 0, 0, MPI_COMM_WORLD);
+                MPI_Send(&temp[rank], 1, MPI_COMPLEX_T, 0, 0, MPI_COMM_WORLD);
             }
             else
             {
                 temp[rank].real = seq[rank].real +
-                                  (std::cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].real)) +
-                                  (std::sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].img));
+                                  (std::cos(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].real)) +
+                                  (std::sin(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].img));
 
                 temp[rank].img = seq[rank].img +
-                                 (std::cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].img)) -
-                                 (std::sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].real));
+                                 (std::cos(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].img)) -
+                                 (std::sin(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].real));
 
-                MPI_Send(&temp[rank], 1, num1type, 0, 0, MPI_COMM_WORLD);
+                MPI_Send(&temp[rank], 1, MPI_COMPLEX_T, 0, 0, MPI_COMM_WORLD);
             }
         }
         else
         {
-            for (int i = 1; i < num + 1; i++)
+            for (int i = 1; i < input_values_count + 1; i++)
             {
-                MPI_Recv(&temp[i], 1, num1type, i, 0, MPI_COMM_WORLD, &status);
+                MPI_Recv(&temp[i], 1, MPI_COMPLEX_T, i, 0, MPI_COMM_WORLD, &status);
             }
         }
 
@@ -148,7 +147,7 @@ int main(int argc, char **argv)
 
         if (rank == 0)
         {
-            for (int i = 1; i < num + 1; i++)
+            for (int i = 1; i < input_values_count + 1; i++)
             {
                 seq[i].real = temp[i].real;
                 seq[i].img = temp[i].img;
@@ -156,17 +155,17 @@ int main(int argc, char **argv)
             div *= 2;
         }
 
-        MPI_Bcast(seq, num + 1, num1type, 0, MPI_COMM_WORLD);
+        MPI_Bcast(seq, input_values_count + 1, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
         MPI_Bcast(&div, 1, MPI_INT, 0, MPI_COMM_WORLD);
     }
 
-    endtime = MPI_Wtime();
+    const double endtime = MPI_Wtime();
 
     if (0 == rank)
     {
         std::printf("\n");
 
-        for (int i = 1; i < num + 1; i++)
+        for (int i = 1; i < input_values_count + 1; i++)
         {
             std::printf("X[%d] : %f", i - 1, seq[i].real);
 
@@ -182,13 +181,14 @@ int main(int argc, char **argv)
 
         std::printf("\n");
         std::printf("Time to broadcast num variable : %lf ms\n", (ab1time - bb1time) * 1000);
-        std::printf("Time to broadcast input and seq array : %lf ms\n", (ab2time - bb2time) * 1000);
+        std::printf("Time to broadcast input_values and seq array : %lf ms\n", (ab2time - bb2time) * 1000);
         std::printf("Time to compute FFT parallely : %lf ms\n", (endtime - starttime) * 1000);
         std::printf("Total Time : %lf ms\n", ((endtime - starttime) + (ab2time - bb2time) + (ab1time - bb1time)) * 1000);
         std::printf("\n");
     }
 
-    MPI_Finalize();
+    const int finalize_success = MPI_Finalize();
+    std::printf("Rank = %d, success = %d (after)\n", rank, finalize_success);
 
     return 0;
 }
