@@ -19,6 +19,16 @@ if(NOT EXISTS "${PROJECT_SOURCE_DIR}/bin" OR NOT IS_DIRECTORY "${PROJECT_SOURCE_
     file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 endif()
 
+add_custom_command(
+    OUTPUT ${PARALLEL_TARGETS_FILE}
+    COMMAND /opt/nfs/config/station204_name_list.sh
+    ARGS 1 16 > ${PARALLEL_TARGETS_FILE}
+    COMMENT "Generating parallel targets file: '${PARALLEL_TARGETS_FILE}'"
+)
+add_library(parallel_nodes OBJECT ${PARALLEL_TARGETS_FILE})
+
+###
+
 add_executable(fft_parallel)
 set_target_properties(fft_parallel PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 target_sources(fft_parallel PRIVATE "${PROJECT_SOURCE_DIR}/fft_parallel.cpp")
@@ -28,12 +38,12 @@ target_include_directories(fft_parallel PRIVATE "${MPICH_INCLUDE_PATH}")
 target_link_directories(fft_parallel PRIVATE "${MPICH_LIBRARY_PATH}")
 target_link_libraries(fft_parallel PRIVATE m mpi)
 
-add_custom_target(run ${MPICH_RUNNER} -f nodes -n 16 $<TARGET_FILE:fft_parallel>)
-add_custom_command(
-    TARGET fft_parallel PRE_BUILD
-    COMMAND /opt/nfs/config/station204_name_list.sh
-    ARGS 1 16 > ${PARALLEL_TARGETS_FILE}
-    COMMENT "Generating parallel targets file: '${PARALLEL_TARGETS_FILE}'"
+add_custom_target(run
+    ${MPICH_RUNNER} -f ${PARALLEL_TARGETS_FILE}
+                    -n ${PARALLEL_PROCESSES_COUNT}
+                    $<TARGET_FILE:fft_parallel>
+    DEPENDS $<TARGET_FILE:fft_parallel>
+            parallel_nodes
 )
 
 ###
@@ -43,3 +53,7 @@ set_target_properties(fft_sequential PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJ
 target_sources(fft_sequential PRIVATE "${PROJECT_SOURCE_DIR}/fft_sequential.c")
 target_compile_features(fft_sequential PRIVATE c_std_23 cxx_std_20)
 target_link_libraries(fft_sequential PRIVATE m)
+
+add_custom_target(sequential $<TARGET_FILE:fft_sequential>
+    DEPENDS $<TARGET_FILE:fft_sequential>
+)
