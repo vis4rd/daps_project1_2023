@@ -1,14 +1,14 @@
-#include <stdio.h>
-#include <math.h>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <mpi.h>
-#include <stdlib.h>
 
 #define PI 3.14159265
 
-struct num1
+struct Complex
 {
-    float real;
-    float img;
+    float real{};
+    float img{};
 };
 
 int reverseBits(int number, int NO_OF_BITS)
@@ -56,17 +56,17 @@ int main(int argc, char **argv)
 
     if (rank == 0)
     {
-        printf("Enter No. of input values(it should be in form of 2^x) : ");
-        scanf("%d", &num);
+        std::printf("Enter No. of input values(it should be in form of 2^x) : ");
+        std::scanf("%d", &num);
     }
 
     bb1time = MPI_Wtime();
     MPI_Bcast(&num, 1, MPI_INT, 0, MPI_COMM_WORLD);
     ab1time = MPI_Wtime();
 
-    struct num1 input[num + 1];
-    struct num1 seq[num + 1];
-    struct num1 temp[num + 1];
+    Complex input[num + 1];
+    Complex seq[num + 1];
+    Complex temp[num + 1];
 
     input[0].real = 0.0;
     input[0].img = 0.0;
@@ -83,17 +83,17 @@ int main(int argc, char **argv)
 
     if (rank == 0)
     {
-        printf("Enter total %d values in floating point formet(separated with space) : ", num);
+        std::printf("Enter total %d values in floating point formet(separated with space) : ", num);
 
         for (int i = 1; i < num + 1; i++)
         {
-            scanf("%f", &input[i].real);
+            std::scanf("%f", &input[i].real);
             input[i].img = 0.0;
         }
 
         for (int i = 1; i < num + 1; i++)
         {
-            seq[i].real = input[reverseBits(i - 1, log2f(num) / log2f(2)) + 1].real; // log2 (x) = logy (x) / logy (2)
+            seq[i].real = input[reverseBits(i - 1, std::log2f(num) / std::log2f(2)) + 1].real; // log2 (x) = logy (x) / logy (2)
             seq[i].img = 0.0;
         }
     }
@@ -102,7 +102,7 @@ int main(int argc, char **argv)
     MPI_Bcast(seq, num + 1, num1type, 0, MPI_COMM_WORLD);
     ab2time = MPI_Wtime();
 
-    key = log2f(num);
+    key = std::log2f(num);
     div = 1;
 
     starttime = MPI_Wtime();
@@ -114,24 +114,24 @@ int main(int argc, char **argv)
             if (((rank + div - 1) / div) % 2 == 0)
             {
                 temp[rank].real = seq[rank - div].real +
-                                  (cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].real)) +
-                                  (sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].img));
+                                  (std::cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].real)) +
+                                  (std::sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].img));
 
                 temp[rank].img = seq[rank - div].img +
-                                 (cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].img)) -
-                                 (sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].real));
+                                 (std::cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].img)) -
+                                 (std::sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].real));
 
                 MPI_Send(&temp[rank], 1, num1type, 0, 0, MPI_COMM_WORLD);
             }
             else
             {
                 temp[rank].real = seq[rank].real +
-                                  (cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].real)) +
-                                  (sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].img));
+                                  (std::cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].real)) +
+                                  (std::sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].img));
 
                 temp[rank].img = seq[rank].img +
-                                 (cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].img)) -
-                                 (sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].real));
+                                 (std::cos(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].img)) -
+                                 (std::sin(PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].real));
 
                 MPI_Send(&temp[rank], 1, num1type, 0, 0, MPI_COMM_WORLD);
             }
@@ -164,28 +164,28 @@ int main(int argc, char **argv)
 
     if (0 == rank)
     {
-        printf("\n");
+        std::printf("\n");
 
         for (int i = 1; i < num + 1; i++)
         {
-            printf("X[%d] : %f", i - 1, seq[i].real);
+            std::printf("X[%d] : %f", i - 1, seq[i].real);
 
             if (seq[i].img >= 0)
             {
-                printf("+j%f\n", seq[i].img);
+                std::printf("+j%f\n", seq[i].img);
             }
             else
             {
-                printf("-j%f\n", seq[i].img - 2 * seq[i].img);
+                std::printf("-j%f\n", seq[i].img - 2 * seq[i].img);
             }
         }
 
-        printf("\n");
-        printf("Time to broadcast num variable : %lf ms\n", (ab1time - bb1time) * 1000);
-        printf("Time to broadcast input and seq array : %lf ms\n", (ab2time - bb2time) * 1000);
-        printf("Time to compute FFT parallely : %lf ms\n", (endtime - starttime) * 1000);
-        printf("Total Time : %lf ms\n", ((endtime - starttime) + (ab2time - bb2time) + (ab1time - bb1time)) * 1000);
-        printf("\n");
+        std::printf("\n");
+        std::printf("Time to broadcast num variable : %lf ms\n", (ab1time - bb1time) * 1000);
+        std::printf("Time to broadcast input and seq array : %lf ms\n", (ab2time - bb2time) * 1000);
+        std::printf("Time to compute FFT parallely : %lf ms\n", (endtime - starttime) * 1000);
+        std::printf("Total Time : %lf ms\n", ((endtime - starttime) + (ab2time - bb2time) + (ab1time - bb1time)) * 1000);
+        std::printf("\n");
     }
 
     MPI_Finalize();
