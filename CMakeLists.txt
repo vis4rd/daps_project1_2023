@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.11)
 
 project(daps_project1_2023 CXX C)
 
+option(ENABLE_LOGGING "Print debug logs" False)
+
 set(MPICH_PATH "/opt/nfs/mpich-4.0.1")
 set(MPICH_BINARY_PATH "${MPICH_PATH}/bin")
 set(MPICH_INCLUDE_PATH "${MPICH_PATH}/include")
@@ -32,7 +34,10 @@ add_library(parallel_nodes OBJECT ${PARALLEL_TARGETS_FILE})
 add_executable(fft_parallel)
 set_target_properties(fft_parallel PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 target_sources(fft_parallel PRIVATE "${PROJECT_SOURCE_DIR}/fft_parallel.cpp")
-target_compile_definitions(fft_parallel PRIVATE "-DUSE_MPI")
+target_compile_definitions(fft_parallel PRIVATE
+    USE_MPI
+    $<$<BOOL:${ENABLE_LOGGING}>:ENABLE_LOGGING>
+)
 target_compile_features(fft_parallel PRIVATE c_std_23 cxx_std_20)
 target_include_directories(fft_parallel PRIVATE "${MPICH_INCLUDE_PATH}")
 target_link_directories(fft_parallel PRIVATE "${MPICH_LIBRARY_PATH}")

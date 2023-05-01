@@ -1,5 +1,6 @@
 {
-    "C_Cpp.formatting": "default",
+    "C_Cpp.formatting": "clangFormat",
+    "C_Cpp.clang_format_sortIncludes": true,
     "[cpp]": {
         "editor.formatOnSave": true
     },

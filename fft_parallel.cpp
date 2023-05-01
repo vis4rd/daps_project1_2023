@@ -1,8 +1,11 @@
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <mpi.h>
+#include <sstream>
 #include <vector>
+
+#include <mpi.h>
 
 #define ND [[nodiscard]]
 
@@ -15,8 +18,9 @@ struct Complex
 ND int reverseBits(int, int);
 ND int getProcessCount();
 ND int getProcessRank();
+void log(int, const char*, auto...);
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
     MPI_Status status;
 
@@ -35,6 +39,15 @@ int main(int argc, char **argv)
         MPI_Bcast(&input_values_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
         return input_values_count;
     }();
+
+    if(rank == 0)
+    {
+        log(rank,
+            "process_count = %d, rank = %d, input_count = %d\n",
+            process_count,
+            rank,
+            input_values_count);
+    }
 
     std::vector<Complex> input_values(input_values_count + 1);
     Complex seq[input_values_count + 1]{};
@@ -68,12 +81,16 @@ int main(int argc, char **argv)
     }
 
     const double starttime = MPI_Wtime();
+    log(rank, "broadcast initial sequence\n");
     MPI_Bcast(seq, input_values_count + 1, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
 
+    int iter = 1;
     for(int div = 1, key = std::log2f(input_values_count); key > 0; key--)
     {
+        log(rank, "iteration(%d): div = %d, key = %d\n", iter++, div, key);
         if(rank != 0)
         {
+            log(rank, "beginning compute...\n");
             if(((rank + div - 1) / div) % 2 == 0)
             {
                 temp[rank].real =
@@ -102,13 +119,16 @@ int main(int argc, char **argv)
 
                 MPI_Send(&temp[rank], 1, MPI_COMPLEX_T, 0, 0, MPI_COMM_WORLD);
             }
+            log(rank, "ending compute...\n");
         }
         else
         {
+            log(rank, "beginning receiving temps...\n");
             for(int i = 1; i < input_values_count + 1; i++)
             {
                 MPI_Recv(&temp[i], 1, MPI_COMPLEX_T, i, 0, MPI_COMM_WORLD, &status);
             }
+            log(rank, "finished receiving temps\n");
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -123,7 +143,9 @@ int main(int argc, char **argv)
             div *= 2;
         }
 
+        log(rank, "broadcast final sequence\n");
         MPI_Bcast(seq, input_values_count + 1, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
+        log(rank, "broadcast final div\n");
         MPI_Bcast(&div, 1, MPI_INT, 0, MPI_COMM_WORLD);
     }
 
@@ -178,4 +200,17 @@ int getProcessRank()
     int rank{};
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     return rank;
+}
+
+void log(int rank, const char* format, auto... args)
+{
+#ifdef ENABLE_LOGGING
+    const auto rank_idx = not not rank;
+
+    std::array<std::string, 2> thread_name = {"master", "slave(" + std::to_string(rank) + ")"};
+
+    std::stringstream strstr;
+    strstr << "LOG | " << thread_name[rank_idx] << " | " << format;
+    std::printf(strstr.str().c_str(), args...);
+#endif
 }

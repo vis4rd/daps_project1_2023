@@ -120,10 +120,12 @@ ReferenceAlignment: Left
 ########## Include sorting
 # IncludeBlocks: Regroup
 IncludeCategories:
+  - Regex: '^<.*\.h>$'
+    Priority: 2
   - Regex: '^<'
     Priority: 1
   - Regex: '^"'
-    Priority: 2
+    Priority: 3
 SortIncludes: CaseSensitive
 SortUsingDeclarations: false
 
