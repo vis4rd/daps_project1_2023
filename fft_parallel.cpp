@@ -15,8 +15,8 @@ namespace global
 MPI_Status mpi_status;
 int process_count{};
 int rank{};
-MPI_Datatype MPI_COMPLEX_T{};
 
+std::vector<float> input;
 int input_size{};
 }  // namespace global
 
@@ -27,46 +27,37 @@ void master(const char*, auto...);
 void slave(const char*, auto...);
 }  // namespace logger
 
-struct Complex
-{
-    float real{};
-    float img{};
-};
-
 void initGlobals();
 ND int reverseBits(int, int);
 ND int getProcessCount();
 ND int getProcessRank();
-ND MPI_Datatype registerMpiDatatype(int,
-    const std::vector<int>&,
-    const std::vector<MPI_Aint>&,
-    const std::vector<MPI_Datatype>&);
-ND std::vector<Complex> getInputValues(const char*);
-void showResults(const Complex*, double, double);
+void initInputValues(const char*);
+void showResults(const float*, const float*, double, double);
 
 int main(int argc, char** argv)
 {
     MPI_Init(&argc, &argv);
     initGlobals();
+    initInputValues("../res/input.txt");
 
-    std::vector<Complex> input_values = getInputValues("../res/input.txt");
+    logger::slave("input_size = %d\n", global::input_size);
 
 
-    Complex seq[global::input_size]{};
-    Complex temp[global::input_size]{};
+    float seq_real[global::input_size]{};
+    float seq_img[global::input_size]{};
+    float temp_real[global::input_size]{};
+    float temp_img[global::input_size]{};
 
-    if(global::rank == 0)
+    const int max_bit_width = std::log2f(global::input_size);
+    for(int i = 1; i < global::input_size; i++)
     {
-        const int max_bit_width = std::log2f(global::input_size);
-        for(int i = 1; i < global::input_size; i++)
-        {
-            seq[i].real = input_values[reverseBits(i - 1, max_bit_width) + 1].real;
-            seq[i].img = 0.0;
-        }
+        seq_real[i] = global::input[reverseBits(i - 1, max_bit_width) + 1];
+        seq_img[i] = 0.0;
     }
 
     logger::master("broadcast initial sequence\n");
-    MPI_Bcast(seq, global::input_size, global::MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
+    MPI_Bcast(seq_real, global::input_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(seq_img, global::input_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
 
 
     const double starttime = MPI_Wtime();
@@ -81,15 +72,16 @@ int main(int argc, char** argv)
             const auto is_odd = 1 - is_even;
             const auto butterfly_index = M_PI * ((rank - 1) % (div * 2)) / div;
 
-            temp[rank].real = seq[rank - (div * is_odd)].real
-                              + (std::cos(butterfly_index) * (seq[rank + (div * is_even)].real))
-                              + (std::sin(butterfly_index) * (seq[rank + (div * is_even)].img));
+            temp_real[rank] = seq_real[rank - (div * is_odd)]
+                              + (std::cos(butterfly_index) * (seq_real[rank + (div * is_even)]))
+                              + (std::sin(butterfly_index) * (seq_img[rank + (div * is_even)]));
 
-            temp[rank].img = seq[rank - (div * is_odd)].img
-                             + (std::cos(butterfly_index) * (seq[rank + (div * is_even)].img))
-                             - (std::sin(butterfly_index) * (seq[rank + (div * is_even)].real));
+            temp_img[rank] = seq_img[rank - (div * is_odd)]
+                             + (std::cos(butterfly_index) * (seq_img[rank + (div * is_even)]))
+                             - (std::sin(butterfly_index) * (seq_real[rank + (div * is_even)]));
 
-            MPI_Send(&temp[rank], 1, global::MPI_COMPLEX_T, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(&temp_real[rank], 1, MPI_FLOAT, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(&temp_img[rank], 1, MPI_FLOAT, 0, 1, MPI_COMM_WORLD);
             logger::slave("ending compute...\n");
         }
         else
@@ -97,18 +89,13 @@ int main(int argc, char** argv)
             logger::master("beginning receiving temps... (count = %d)\n", global::input_size);
             for(int i = 1; i < global::input_size; i++)
             {
-                MPI_Recv(&temp[i],
-                    1,
-                    global::MPI_COMPLEX_T,
-                    i,
-                    0,
-                    MPI_COMM_WORLD,
-                    &global::mpi_status);
+                MPI_Recv(&temp_real[i], 1, MPI_FLOAT, i, 0, MPI_COMM_WORLD, &global::mpi_status);
+                MPI_Recv(&temp_img[i], 1, MPI_FLOAT, i, 1, MPI_COMM_WORLD, &global::mpi_status);
                 logger::master(" -- received iteration (i = %d, status = %d, temp[i] = {%f, %f})\n",
                     i,
                     global::mpi_status,
-                    temp[i].real,
-                    temp[i].img);
+                    temp_real[i],
+                    temp_img[i]);
             }
             logger::master("finished receiving temps\n");
         }
@@ -119,17 +106,18 @@ int main(int argc, char** argv)
         {
             for(int i = 1; i < global::input_size; i++)
             {
-                seq[i].real = temp[i].real;
-                seq[i].img = temp[i].img;
+                seq_real[i] = temp_real[i];
+                seq_img[i] = temp_img[i];
             }
         }
 
         logger::master("broadcast final sequence\n");
-        MPI_Bcast(seq, global::input_size, global::MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
+        MPI_Bcast(seq_real, global::input_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(seq_img, global::input_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
     }
 
     const double endtime = MPI_Wtime();
-    showResults(seq, starttime, endtime);
+    showResults(seq_real, seq_img, starttime, endtime);
 
     MPI_Finalize();
     return 0;
@@ -141,11 +129,6 @@ void initGlobals()
 {
     global::process_count = getProcessCount();
     global::rank = getProcessRank();
-
-    global::MPI_COMPLEX_T = registerMpiDatatype(sizeof(Complex) / sizeof(float),
-        {sizeof(float), sizeof(float)},
-        {0, 4},
-        {MPI_FLOAT, MPI_FLOAT});
 }
 
 int reverseBits(int number, int bit_range)
@@ -187,34 +170,50 @@ MPI_Datatype registerMpiDatatype(int num_of_values,
     return new_type;
 }
 
-std::vector<Complex> getInputValues(const char* path)
+void initInputValues(const char* path)
 {
-    std::vector<Complex> result;
     if(global::rank == 0)
     {
         std::ifstream file(path);
 
         if(not file.is_open())
         {
-            return {};
+            return;
         }
 
-        result.emplace_back(0, 0);
+        global::input.push_back(0);
 
         float real{};
-        float img{};
-        while(file >> real >> img)
+        while(file >> real)
         {
-            result.emplace_back(real, img);
+            global::input.push_back(real);
         }
-        global::input_size = result.size();
+    }
+    global::input_size = global::input.size();
+    MPI_Bcast(&global::input_size, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+
+    float temp[global::input_size] = {0};
+
+    if(global::rank == 0)
+    {
+        for(int i = 0; i < global::input_size; i++)
+        {
+            temp[i] = global::input[i];
+        }
     }
 
-    MPI_Bcast(&global::input_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    return std::move(result);
+    MPI_Bcast(temp, global::input_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
+
+    if(global::rank != 0)
+    {
+        for(int i = 0; i < global::input_size; i++)
+        {
+            global::input.push_back(temp[i]);
+        }
+    }
 }
 
-void showResults(const Complex* seq, double starttime, double endtime)
+void showResults(const float* seq_real, const float* seq_img, double starttime, double endtime)
 {
     if(0 == global::rank)
     {
@@ -222,15 +221,15 @@ void showResults(const Complex* seq, double starttime, double endtime)
 
         for(int i = 1; i < global::input_size; i++)
         {
-            std::printf("X[%d] : %f", i - 1, seq[i].real);
+            std::printf("X[%d] : %+6.2f", i - 1, seq_real[i]);
 
-            if(seq[i].img >= 0)
+            if(seq_img[i] >= 0)
             {
-                std::printf("+j%f\n", seq[i].img);
+                std::printf(" + i%-6.2f\n", seq_img[i]);
             }
             else
             {
-                std::printf("-j%f\n", seq[i].img - 2 * seq[i].img);
+                std::printf(" - i%-6.2f\n", seq_img[i] - 2 * seq_img[i]);
             }
         }
 
