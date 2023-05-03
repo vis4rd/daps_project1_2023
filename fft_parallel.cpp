@@ -14,6 +14,7 @@ namespace global
 {
 MPI_Status mpi_status;
 int process_count{};
+int slave_count{};
 int rank{};
 
 std::vector<float> input;
@@ -53,6 +54,8 @@ int main(int argc, char** argv)
     logger::master("broadcast initial sequence\n");
     MPI_Bcast(seq_real, global::input_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
 
+    const int values_per_process = global::input_size / global::slave_count;
+
     const double starttime = MPI_Wtime();
     for(int div = 1, key = std::log2f(global::input_size - 1); key > 0; key--, div *= 2)
     {
@@ -61,34 +64,80 @@ int main(int argc, char** argv)
             using global::rank;
 
             logger::slave("beginning compute...\n");
-            const auto is_even = ((rank + div - 1) / div) % 2;
-            const auto is_odd = 1 - is_even;
-            const auto butterfly_index = M_PI * ((rank - 1) % (div * 2)) / div;
+            for(int b = 0; b < values_per_process; b++)
+            {
+                const auto b_rank = (rank - 1) * values_per_process + b + 1;
+                const auto is_even = ((b_rank + div - 1) / div) % 2;
+                const auto is_odd = 1 - is_even;
+                const auto butterfly_index = M_PI * ((b_rank - 1) % (div * 2)) / div;
 
-            seq_real[rank] = seq_real[rank - (div * is_odd)]
-                             + (std::cos(butterfly_index) * (seq_real[rank + (div * is_even)]))
-                             + (std::sin(butterfly_index) * (seq_img[rank + (div * is_even)]));
+                seq_real[b_rank] =
+                    seq_real[b_rank - (div * is_odd)]
+                    + (std::cos(butterfly_index) * (seq_real[b_rank + (div * is_even)]))
+                    + (std::sin(butterfly_index) * (seq_img[b_rank + (div * is_even)]));
 
-            seq_img[rank] = seq_img[rank - (div * is_odd)]
-                            + (std::cos(butterfly_index) * (seq_img[rank + (div * is_even)]))
-                            - (std::sin(butterfly_index) * (seq_real[rank + (div * is_even)]));
+                seq_img[b_rank] =
+                    seq_img[b_rank - (div * is_odd)]
+                    + (std::cos(butterfly_index) * (seq_img[b_rank + (div * is_even)]))
+                    - (std::sin(butterfly_index) * (seq_real[b_rank + (div * is_even)]));
 
-            MPI_Send(&seq_real[rank], 1, MPI_FLOAT, 0, 0, MPI_COMM_WORLD);
-            MPI_Send(&seq_img[rank], 1, MPI_FLOAT, 0, 1, MPI_COMM_WORLD);
+                logger::slave(
+                    " ++ sending to master: b_rank = %d, tag_real = %d, tag_img = %d, seq[b_rank] = {%f, %f}\n",
+                    b_rank,
+                    0 + values_per_process * b,
+                    1 + values_per_process * b,
+                    seq_real[b_rank],
+                    seq_img[b_rank]);
+
+                MPI_Send(&seq_real[b_rank],
+                    1,
+                    MPI_FLOAT,
+                    0,
+                    0 + values_per_process * b,
+                    MPI_COMM_WORLD);
+                MPI_Send(&seq_img[b_rank],
+                    1,
+                    MPI_FLOAT,
+                    0,
+                    1 + values_per_process * b,
+                    MPI_COMM_WORLD);
+            }
+
             logger::slave("ending compute...\n");
         }
         else
         {
-            logger::master("beginning receiving temps... (count = %d)\n", global::input_size);
-            for(int i = 1; i < global::input_size; i++)
+            logger::master("beginning receiving sequence... (count = %d)\n",
+                global::input_size - 1);
+            for(int i = 1; i <= global::input_size / values_per_process; i++)
             {
-                MPI_Recv(&seq_real[i], 1, MPI_FLOAT, i, 0, MPI_COMM_WORLD, &global::mpi_status);
-                MPI_Recv(&seq_img[i], 1, MPI_FLOAT, i, 1, MPI_COMM_WORLD, &global::mpi_status);
-                logger::master(" -- received iteration (i = %d, status = %d, temp[i] = {%f, %f})\n",
-                    i,
-                    global::mpi_status,
-                    seq_real[i],
-                    seq_img[i]);
+                for(int b = 0; b < values_per_process; b++)
+                {
+                    const auto b_i = (i - 1) * values_per_process + b + 1;
+                    MPI_Recv(&seq_real[b_i],
+                        1,
+                        MPI_FLOAT,
+                        i,
+                        0 + values_per_process * b,
+                        MPI_COMM_WORLD,
+                        &global::mpi_status);
+                    MPI_Recv(&seq_img[b_i],
+                        1,
+                        MPI_FLOAT,
+                        i,
+                        1 + values_per_process * b,
+                        MPI_COMM_WORLD,
+                        &global::mpi_status);
+                    logger::master(
+                        " -- received from slave %d: b_i = %d, tag_real = %d, tag_img = %d, status = %d, seq[b_i] = {%f, %f}\n",
+                        i,
+                        b_i,
+                        0 + values_per_process * b,
+                        1 + values_per_process * b,
+                        global::mpi_status,
+                        seq_real[b_i],
+                        seq_img[b_i]);
+                }
             }
             logger::master("finished receiving temps\n");
         }
@@ -112,6 +161,7 @@ int main(int argc, char** argv)
 void initGlobals()
 {
     global::process_count = getProcessCount();
+    global::slave_count = global::process_count - 1;
     global::rank = getProcessRank();
 }
 
@@ -137,21 +187,6 @@ int getProcessRank()
     int rank = -1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     return rank;
-}
-
-MPI_Datatype registerMpiDatatype(int num_of_values,
-    const std::vector<int>& sizes_of_values,
-    const std::vector<MPI_Aint>& strides_of_values,
-    const std::vector<MPI_Datatype>& types_of_values)
-{
-    MPI_Datatype new_type;
-    MPI_Type_create_struct(num_of_values,
-        sizes_of_values.data(),
-        strides_of_values.data(),
-        types_of_values.data(),
-        &new_type);
-    MPI_Type_commit(&new_type);
-    return new_type;
 }
 
 void initInputValues(const char* path)
