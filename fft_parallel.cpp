@@ -83,7 +83,7 @@ int main(int argc, char** argv)
     LOG_SLAVE("input_count = %d\n", input_values_count);
 
     int iter = 1;
-    for(int div = 1, key = std::log2f(input_values_count - 1); key > 0; key--)
+    for(int div = 1, key = std::log2f(input_values_count - 1); key > 0; key--, div *= 2)
     {
         log(rank, "iteration(%d): div = %d, key = %d\n", iter++, div, key);
         if(rank != 0)
@@ -127,13 +127,10 @@ int main(int argc, char** argv)
                 seq[i].real = temp[i].real;
                 seq[i].img = temp[i].img;
             }
-            div *= 2;
         }
 
         LOG_MASTER("broadcast final sequence\n");
         MPI_Bcast(seq, input_values_count, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
-        LOG_MASTER("broadcast final div\n");
-        MPI_Bcast(&div, 1, MPI_INT, 0, MPI_COMM_WORLD);
     }
 
     const double endtime = MPI_Wtime();
