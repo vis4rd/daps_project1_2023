@@ -40,13 +40,8 @@ int main(int argc, char** argv)
     initGlobals();
     initInputValues("../res/input.txt");
 
-    logger::slave("input_size = %d\n", global::input_size);
-
-
     float seq_real[global::input_size]{};
     float seq_img[global::input_size]{};
-    float temp_real[global::input_size]{};
-    float temp_img[global::input_size]{};
 
     const int max_bit_width = std::log2f(global::input_size);
     for(int i = 1; i < global::input_size; i++)
@@ -57,8 +52,6 @@ int main(int argc, char** argv)
 
     logger::master("broadcast initial sequence\n");
     MPI_Bcast(seq_real, global::input_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(seq_img, global::input_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
-
 
     const double starttime = MPI_Wtime();
     for(int div = 1, key = std::log2f(global::input_size - 1); key > 0; key--, div *= 2)
@@ -72,16 +65,16 @@ int main(int argc, char** argv)
             const auto is_odd = 1 - is_even;
             const auto butterfly_index = M_PI * ((rank - 1) % (div * 2)) / div;
 
-            temp_real[rank] = seq_real[rank - (div * is_odd)]
-                              + (std::cos(butterfly_index) * (seq_real[rank + (div * is_even)]))
-                              + (std::sin(butterfly_index) * (seq_img[rank + (div * is_even)]));
+            seq_real[rank] = seq_real[rank - (div * is_odd)]
+                             + (std::cos(butterfly_index) * (seq_real[rank + (div * is_even)]))
+                             + (std::sin(butterfly_index) * (seq_img[rank + (div * is_even)]));
 
-            temp_img[rank] = seq_img[rank - (div * is_odd)]
-                             + (std::cos(butterfly_index) * (seq_img[rank + (div * is_even)]))
-                             - (std::sin(butterfly_index) * (seq_real[rank + (div * is_even)]));
+            seq_img[rank] = seq_img[rank - (div * is_odd)]
+                            + (std::cos(butterfly_index) * (seq_img[rank + (div * is_even)]))
+                            - (std::sin(butterfly_index) * (seq_real[rank + (div * is_even)]));
 
-            MPI_Send(&temp_real[rank], 1, MPI_FLOAT, 0, 0, MPI_COMM_WORLD);
-            MPI_Send(&temp_img[rank], 1, MPI_FLOAT, 0, 1, MPI_COMM_WORLD);
+            MPI_Send(&seq_real[rank], 1, MPI_FLOAT, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(&seq_img[rank], 1, MPI_FLOAT, 0, 1, MPI_COMM_WORLD);
             logger::slave("ending compute...\n");
         }
         else
@@ -89,27 +82,18 @@ int main(int argc, char** argv)
             logger::master("beginning receiving temps... (count = %d)\n", global::input_size);
             for(int i = 1; i < global::input_size; i++)
             {
-                MPI_Recv(&temp_real[i], 1, MPI_FLOAT, i, 0, MPI_COMM_WORLD, &global::mpi_status);
-                MPI_Recv(&temp_img[i], 1, MPI_FLOAT, i, 1, MPI_COMM_WORLD, &global::mpi_status);
+                MPI_Recv(&seq_real[i], 1, MPI_FLOAT, i, 0, MPI_COMM_WORLD, &global::mpi_status);
+                MPI_Recv(&seq_img[i], 1, MPI_FLOAT, i, 1, MPI_COMM_WORLD, &global::mpi_status);
                 logger::master(" -- received iteration (i = %d, status = %d, temp[i] = {%f, %f})\n",
                     i,
                     global::mpi_status,
-                    temp_real[i],
-                    temp_img[i]);
+                    seq_real[i],
+                    seq_img[i]);
             }
             logger::master("finished receiving temps\n");
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
-
-        if(global::rank == 0)
-        {
-            for(int i = 1; i < global::input_size; i++)
-            {
-                seq_real[i] = temp_real[i];
-                seq_img[i] = temp_img[i];
-            }
-        }
 
         logger::master("broadcast final sequence\n");
         MPI_Bcast(seq_real, global::input_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
