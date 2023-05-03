@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <sstream>
 #include <vector>
 
@@ -18,6 +19,11 @@ struct Complex
 ND int reverseBits(int, int);
 ND int getProcessCount();
 ND int getProcessRank();
+ND MPI_Datatype registerMpiDatatype(int,
+    const std::vector<int>&,
+    const std::vector<MPI_Aint>&,
+    const std::vector<MPI_Datatype>&);
+ND std::vector<Complex> getInputValues(const char*);
 void log(int, const char*, auto...);
 
 int main(int argc, char** argv)
@@ -29,16 +35,20 @@ int main(int argc, char** argv)
     const int process_count = getProcessCount();
     const int rank = getProcessRank();
 
-    const int input_values_count = [&rank]() -> int {
-        int input_values_count{};
-        if(rank == 0)
-        {
-            std::printf("Enter No. of input values(it should be in form of 2^x) : ");
-            std::scanf("%d", &input_values_count);
-        }
-        MPI_Bcast(&input_values_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        return input_values_count;
-    }();
+    auto MPI_COMPLEX_T = registerMpiDatatype(sizeof(Complex) / sizeof(float),
+        {sizeof(float), sizeof(float)},
+        {0, 4},
+        {MPI_FLOAT, MPI_FLOAT});
+
+    std::vector<Complex> input_values;
+    if(rank == 0)
+    {
+        input_values = getInputValues("../res/input.txt");
+    }
+    auto input_values_count = input_values.size();
+    MPI_Bcast(&input_values_count, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+    Complex seq[input_values_count]{};
+    Complex temp[input_values_count]{};
 
     if(rank == 0)
     {
@@ -49,31 +59,10 @@ int main(int argc, char** argv)
             input_values_count);
     }
 
-    std::vector<Complex> input_values(input_values_count + 1);
-    Complex seq[input_values_count + 1]{};
-    Complex temp[input_values_count + 1]{};
-
-    MPI_Datatype MPI_COMPLEX_T;
-    MPI_Type_create_struct(sizeof(Complex) / sizeof(float),
-        (const int[2]){sizeof(float), sizeof(float)},
-        (const MPI_Aint[2]){0, 4},
-        (const MPI_Datatype[2]){MPI_FLOAT, MPI_FLOAT},
-        &MPI_COMPLEX_T);
-    MPI_Type_commit(&MPI_COMPLEX_T);
-
     if(rank == 0)
     {
-        std::printf("Enter total %d values in floating point format(separated with space) : ",
-            input_values_count);
-
-        for(int i = 1; i < input_values_count + 1; i++)
-        {
-            std::scanf("%f", &input_values[i].real);
-            input_values[i].img = 0.0;
-        }
-
         const int max_bit_width = std::log2f(input_values_count);
-        for(int i = 1; i < input_values_count + 1; i++)
+        for(int i = 1; i < input_values_count; i++)
         {
             seq[i].real = input_values[reverseBits(i - 1, max_bit_width) + 1].real;
             seq[i].img = 0.0;
@@ -82,10 +71,10 @@ int main(int argc, char** argv)
 
     const double starttime = MPI_Wtime();
     log(rank, "broadcast initial sequence\n");
-    MPI_Bcast(seq, input_values_count + 1, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
+    MPI_Bcast(seq, input_values_count, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
 
     int iter = 1;
-    for(int div = 1, key = std::log2f(input_values_count); key > 0; key--)
+    for(int div = 1, key = std::log2f(input_values_count - 1); key > 0; key--)
     {
         log(rank, "iteration(%d): div = %d, key = %d\n", iter++, div, key);
         if(rank != 0)
@@ -124,7 +113,7 @@ int main(int argc, char** argv)
         else
         {
             log(rank, "beginning receiving temps...\n");
-            for(int i = 1; i < input_values_count + 1; i++)
+            for(int i = 1; i < input_values_count; i++)
             {
                 MPI_Recv(&temp[i], 1, MPI_COMPLEX_T, i, 0, MPI_COMM_WORLD, &status);
             }
@@ -135,7 +124,7 @@ int main(int argc, char** argv)
 
         if(rank == 0)
         {
-            for(int i = 1; i < input_values_count + 1; i++)
+            for(int i = 1; i < input_values_count; i++)
             {
                 seq[i].real = temp[i].real;
                 seq[i].img = temp[i].img;
@@ -144,7 +133,7 @@ int main(int argc, char** argv)
         }
 
         log(rank, "broadcast final sequence\n");
-        MPI_Bcast(seq, input_values_count + 1, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
+        MPI_Bcast(seq, input_values_count, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
         log(rank, "broadcast final div\n");
         MPI_Bcast(&div, 1, MPI_INT, 0, MPI_COMM_WORLD);
     }
@@ -155,7 +144,7 @@ int main(int argc, char** argv)
     {
         std::printf("\n");
 
-        for(int i = 1; i < input_values_count + 1; i++)
+        for(int i = 1; i < input_values_count; i++)
         {
             std::printf("X[%d] : %f", i - 1, seq[i].real);
 
@@ -200,6 +189,43 @@ int getProcessRank()
     int rank{};
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     return rank;
+}
+
+MPI_Datatype registerMpiDatatype(int num_of_values,
+    const std::vector<int>& sizes_of_values,
+    const std::vector<MPI_Aint>& strides_of_values,
+    const std::vector<MPI_Datatype>& types_of_values)
+{
+    MPI_Datatype new_type;
+    MPI_Type_create_struct(num_of_values,
+        sizes_of_values.data(),
+        strides_of_values.data(),
+        types_of_values.data(),
+        &new_type);
+    MPI_Type_commit(&new_type);
+    return new_type;
+}
+
+std::vector<Complex> getInputValues(const char* path)
+{
+    std::ifstream file(path);
+    std::vector<Complex> result;
+
+    if(not file.is_open())
+    {
+        return {};
+    }
+
+    result.emplace_back(0, 0);
+
+    float real{};
+    float img{};
+    while(file >> real >> img)
+    {
+        result.emplace_back(real, img);
+    }
+
+    return std::move(result);
 }
 
 void log(int rank, const char* format, auto... args)
