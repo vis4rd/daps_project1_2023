@@ -40,24 +40,28 @@ int main(int argc, char** argv)
         {0, 4},
         {MPI_FLOAT, MPI_FLOAT});
 
-    std::vector<Complex> input_values;
+    const auto LOG_MASTER = [&rank](auto... vals) {
+        if(rank == 0)
+        {
+            log(0, vals...);
+        }
+    };
+    const auto LOG_SLAVE = [&rank](auto... vals) {
+        if(rank != 0)
+        {
+            log(rank, vals...);
+        }
+    };
+
+    std::vector<Complex> input_values{};
     if(rank == 0)
     {
         input_values = getInputValues("../res/input.txt");
     }
-    auto input_values_count = input_values.size();
-    MPI_Bcast(&input_values_count, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+    int input_values_count = input_values.size();
+    MPI_Bcast(&input_values_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
     Complex seq[input_values_count]{};
     Complex temp[input_values_count]{};
-
-    if(rank == 0)
-    {
-        log(rank,
-            "process_count = %d, rank = %d, input_count = %d\n",
-            process_count,
-            rank,
-            input_values_count);
-    }
 
     if(rank == 0)
     {
@@ -70,8 +74,13 @@ int main(int argc, char** argv)
     }
 
     const double starttime = MPI_Wtime();
-    log(rank, "broadcast initial sequence\n");
+    LOG_MASTER("broadcast initial sequence\n");
+
     MPI_Bcast(seq, input_values_count, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
+
+    log(rank, "1\n");
+
+    LOG_SLAVE("input_count = %d\n", input_values_count);
 
     int iter = 1;
     for(int div = 1, key = std::log2f(input_values_count - 1); key > 0; key--)
@@ -79,7 +88,7 @@ int main(int argc, char** argv)
         log(rank, "iteration(%d): div = %d, key = %d\n", iter++, div, key);
         if(rank != 0)
         {
-            log(rank, "beginning compute...\n");
+            LOG_SLAVE("beginning compute...\n");
             const auto is_even = ((rank + div - 1) / div) % 2;
             const auto is_odd = 1 - is_even;
             const auto butterfly_index = M_PI * ((rank - 1) % (div * 2)) / div;
@@ -93,16 +102,20 @@ int main(int argc, char** argv)
                              - (std::sin(butterfly_index) * (seq[rank + (div * is_even)].real));
 
             MPI_Send(&temp[rank], 1, MPI_COMPLEX_T, 0, 0, MPI_COMM_WORLD);
-            log(rank, "ending compute...\n");
+            LOG_SLAVE("ending compute...\n");
         }
         else
         {
-            log(rank, "beginning receiving temps...\n");
+            LOG_MASTER("beginning receiving temps... (count = %d)\n", input_values_count);
             for(int i = 1; i < input_values_count; i++)
             {
+                LOG_MASTER(" -- receiving iteration (i = %d, status = %d, temp[i] = %d)\n",
+                    i,
+                    status,
+                    temp[i]);
                 MPI_Recv(&temp[i], 1, MPI_COMPLEX_T, i, 0, MPI_COMM_WORLD, &status);
             }
-            log(rank, "finished receiving temps\n");
+            LOG_MASTER("finished receiving temps\n");
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -117,9 +130,9 @@ int main(int argc, char** argv)
             div *= 2;
         }
 
-        log(rank, "broadcast final sequence\n");
+        LOG_MASTER("broadcast final sequence\n");
         MPI_Bcast(seq, input_values_count, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
-        log(rank, "broadcast final div\n");
+        LOG_MASTER("broadcast final div\n");
         MPI_Bcast(&div, 1, MPI_INT, 0, MPI_COMM_WORLD);
     }
 
@@ -171,7 +184,7 @@ int getProcessCount()
 
 int getProcessRank()
 {
-    int rank{};
+    int rank = -1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     return rank;
 }
