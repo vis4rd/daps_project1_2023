@@ -80,34 +80,19 @@ int main(int argc, char** argv)
         if(rank != 0)
         {
             log(rank, "beginning compute...\n");
-            if(((rank + div - 1) / div) % 2 == 0)
-            {
-                temp[rank].real =
-                    seq[rank - div].real
-                    + (std::cos(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].real))
-                    + (std::sin(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].img));
+            const auto is_even = ((rank + div - 1) / div) % 2;
+            const auto is_odd = 1 - is_even;
+            const auto butterfly_index = M_PI * ((rank - 1) % (div * 2)) / div;
 
-                temp[rank].img =
-                    seq[rank - div].img
-                    + (std::cos(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].img))
-                    - (std::sin(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank].real));
+            temp[rank].real = seq[rank - (div * is_odd)].real
+                              + (std::cos(butterfly_index) * (seq[rank + (div * is_even)].real))
+                              + (std::sin(butterfly_index) * (seq[rank + (div * is_even)].img));
 
-                MPI_Send(&temp[rank], 1, MPI_COMPLEX_T, 0, 0, MPI_COMM_WORLD);
-            }
-            else
-            {
-                temp[rank].real =
-                    seq[rank].real
-                    + (std::cos(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].real))
-                    + (std::sin(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].img));
+            temp[rank].img = seq[rank - (div * is_odd)].img
+                             + (std::cos(butterfly_index) * (seq[rank + (div * is_even)].img))
+                             - (std::sin(butterfly_index) * (seq[rank + (div * is_even)].real));
 
-                temp[rank].img =
-                    seq[rank].img
-                    + (std::cos(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].img))
-                    - (std::sin(M_PI * ((rank - 1) % (div * 2)) / div) * (seq[rank + div].real));
-
-                MPI_Send(&temp[rank], 1, MPI_COMPLEX_T, 0, 0, MPI_COMM_WORLD);
-            }
+            MPI_Send(&temp[rank], 1, MPI_COMPLEX_T, 0, 0, MPI_COMM_WORLD);
             log(rank, "ending compute...\n");
         }
         else
