@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.11)
 project(daps_project1_2023 CXX C)
 
 option(ENABLE_LOGGING "Print debug logs" False)
+option(ENABLE_ASAN "Enable address sanitizer" False)
 
 set(MPICH_PATH "/opt/nfs/mpich-4.0.1")
 set(MPICH_BINARY_PATH "${MPICH_PATH}/bin")
@@ -39,9 +40,11 @@ target_compile_definitions(fft_parallel PRIVATE
     $<$<BOOL:${ENABLE_LOGGING}>:ENABLE_LOGGING>
 )
 target_compile_features(fft_parallel PRIVATE c_std_23 cxx_std_20)
+target_compile_options(fft_parallel PRIVATE $<$<BOOL:${ENABLE_ASAN}>:-fsanitize=address>)
 target_include_directories(fft_parallel PRIVATE "${MPICH_INCLUDE_PATH}")
 target_link_directories(fft_parallel PRIVATE "${MPICH_LIBRARY_PATH}")
 target_link_libraries(fft_parallel PRIVATE m mpi)
+target_link_options(fft_parallel PRIVATE $<$<BOOL:${ENABLE_ASAN}>:-fsanitize=address>)
 
 add_custom_target(run
     ${MPICH_RUNNER} -f ${PARALLEL_TARGETS_FILE}
