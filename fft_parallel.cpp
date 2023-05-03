@@ -10,12 +10,30 @@
 
 #define ND [[nodiscard]]
 
+namespace global
+{
+MPI_Status mpi_status;
+int process_count{};
+int rank{};
+MPI_Datatype MPI_COMPLEX_T{};
+
+int input_size{};
+}  // namespace global
+
+namespace logger
+{
+void all(const char*, auto...);
+void master(const char*, auto...);
+void slave(const char*, auto...);
+}  // namespace logger
+
 struct Complex
 {
     float real{};
     float img{};
 };
 
+void initGlobals();
 ND int reverseBits(int, int);
 ND int getProcessCount();
 ND int getProcessRank();
@@ -24,71 +42,41 @@ ND MPI_Datatype registerMpiDatatype(int,
     const std::vector<MPI_Aint>&,
     const std::vector<MPI_Datatype>&);
 ND std::vector<Complex> getInputValues(const char*);
-void log(int, const char*, auto...);
+void showResults(const Complex*, double, double);
 
 int main(int argc, char** argv)
 {
-    MPI_Status status;
-
     MPI_Init(&argc, &argv);
+    initGlobals();
 
-    const int process_count = getProcessCount();
-    const int rank = getProcessRank();
+    std::vector<Complex> input_values = getInputValues("../res/input.txt");
 
-    auto MPI_COMPLEX_T = registerMpiDatatype(sizeof(Complex) / sizeof(float),
-        {sizeof(float), sizeof(float)},
-        {0, 4},
-        {MPI_FLOAT, MPI_FLOAT});
 
-    const auto LOG_MASTER = [&rank](auto... vals) {
-        if(rank == 0)
-        {
-            log(0, vals...);
-        }
-    };
-    const auto LOG_SLAVE = [&rank](auto... vals) {
-        if(rank != 0)
-        {
-            log(rank, vals...);
-        }
-    };
+    Complex seq[global::input_size]{};
+    Complex temp[global::input_size]{};
 
-    std::vector<Complex> input_values{};
-    if(rank == 0)
+    if(global::rank == 0)
     {
-        input_values = getInputValues("../res/input.txt");
-    }
-    int input_values_count = input_values.size();
-    MPI_Bcast(&input_values_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    Complex seq[input_values_count]{};
-    Complex temp[input_values_count]{};
-
-    if(rank == 0)
-    {
-        const int max_bit_width = std::log2f(input_values_count);
-        for(int i = 1; i < input_values_count; i++)
+        const int max_bit_width = std::log2f(global::input_size);
+        for(int i = 1; i < global::input_size; i++)
         {
             seq[i].real = input_values[reverseBits(i - 1, max_bit_width) + 1].real;
             seq[i].img = 0.0;
         }
     }
 
+    logger::master("broadcast initial sequence\n");
+    MPI_Bcast(seq, global::input_size, global::MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
+
+
     const double starttime = MPI_Wtime();
-    LOG_MASTER("broadcast initial sequence\n");
-
-    MPI_Bcast(seq, input_values_count, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
-
-    log(rank, "1\n");
-
-    LOG_SLAVE("input_count = %d\n", input_values_count);
-
-    int iter = 1;
-    for(int div = 1, key = std::log2f(input_values_count - 1); key > 0; key--, div *= 2)
+    for(int div = 1, key = std::log2f(global::input_size - 1); key > 0; key--, div *= 2)
     {
-        log(rank, "iteration(%d): div = %d, key = %d\n", iter++, div, key);
-        if(rank != 0)
+        if(global::rank != 0)
         {
-            LOG_SLAVE("beginning compute...\n");
+            using global::rank;
+
+            logger::slave("beginning compute...\n");
             const auto is_even = ((rank + div - 1) / div) % 2;
             const auto is_odd = 1 - is_even;
             const auto butterfly_index = M_PI * ((rank - 1) % (div * 2)) / div;
@@ -101,65 +89,63 @@ int main(int argc, char** argv)
                              + (std::cos(butterfly_index) * (seq[rank + (div * is_even)].img))
                              - (std::sin(butterfly_index) * (seq[rank + (div * is_even)].real));
 
-            MPI_Send(&temp[rank], 1, MPI_COMPLEX_T, 0, 0, MPI_COMM_WORLD);
-            LOG_SLAVE("ending compute...\n");
+            MPI_Send(&temp[rank], 1, global::MPI_COMPLEX_T, 0, 0, MPI_COMM_WORLD);
+            logger::slave("ending compute...\n");
         }
         else
         {
-            LOG_MASTER("beginning receiving temps... (count = %d)\n", input_values_count);
-            for(int i = 1; i < input_values_count; i++)
+            logger::master("beginning receiving temps... (count = %d)\n", global::input_size);
+            for(int i = 1; i < global::input_size; i++)
             {
-                LOG_MASTER(" -- receiving iteration (i = %d, status = %d, temp[i] = %d)\n",
+                MPI_Recv(&temp[i],
+                    1,
+                    global::MPI_COMPLEX_T,
                     i,
-                    status,
-                    temp[i]);
-                MPI_Recv(&temp[i], 1, MPI_COMPLEX_T, i, 0, MPI_COMM_WORLD, &status);
+                    0,
+                    MPI_COMM_WORLD,
+                    &global::mpi_status);
+                logger::master(" -- received iteration (i = %d, status = %d, temp[i] = {%f, %f})\n",
+                    i,
+                    global::mpi_status,
+                    temp[i].real,
+                    temp[i].img);
             }
-            LOG_MASTER("finished receiving temps\n");
+            logger::master("finished receiving temps\n");
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
 
-        if(rank == 0)
+        if(global::rank == 0)
         {
-            for(int i = 1; i < input_values_count; i++)
+            for(int i = 1; i < global::input_size; i++)
             {
                 seq[i].real = temp[i].real;
                 seq[i].img = temp[i].img;
             }
         }
 
-        LOG_MASTER("broadcast final sequence\n");
-        MPI_Bcast(seq, input_values_count, MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
+        logger::master("broadcast final sequence\n");
+        MPI_Bcast(seq, global::input_size, global::MPI_COMPLEX_T, 0, MPI_COMM_WORLD);
     }
 
     const double endtime = MPI_Wtime();
-
-    if(0 == rank)
-    {
-        std::printf("\n");
-
-        for(int i = 1; i < input_values_count; i++)
-        {
-            std::printf("X[%d] : %f", i - 1, seq[i].real);
-
-            if(seq[i].img >= 0)
-            {
-                std::printf("+j%f\n", seq[i].img);
-            }
-            else
-            {
-                std::printf("-j%f\n", seq[i].img - 2 * seq[i].img);
-            }
-        }
-
-        std::printf("\n");
-        std::printf("Total Time : %lf ms\n", (endtime - starttime) * 1000);
-        std::printf("\n");
-    }
+    showResults(seq, starttime, endtime);
 
     MPI_Finalize();
     return 0;
+}
+
+////////////////
+
+void initGlobals()
+{
+    global::process_count = getProcessCount();
+    global::rank = getProcessRank();
+
+    global::MPI_COMPLEX_T = registerMpiDatatype(sizeof(Complex) / sizeof(float),
+        {sizeof(float), sizeof(float)},
+        {0, 4},
+        {MPI_FLOAT, MPI_FLOAT});
 }
 
 int reverseBits(int number, int bit_range)
@@ -203,35 +189,86 @@ MPI_Datatype registerMpiDatatype(int num_of_values,
 
 std::vector<Complex> getInputValues(const char* path)
 {
-    std::ifstream file(path);
     std::vector<Complex> result;
-
-    if(not file.is_open())
+    if(global::rank == 0)
     {
-        return {};
+        std::ifstream file(path);
+
+        if(not file.is_open())
+        {
+            return {};
+        }
+
+        result.emplace_back(0, 0);
+
+        float real{};
+        float img{};
+        while(file >> real >> img)
+        {
+            result.emplace_back(real, img);
+        }
+        global::input_size = result.size();
     }
 
-    result.emplace_back(0, 0);
-
-    float real{};
-    float img{};
-    while(file >> real >> img)
-    {
-        result.emplace_back(real, img);
-    }
-
+    MPI_Bcast(&global::input_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
     return std::move(result);
 }
 
-void log(int rank, const char* format, auto... args)
+void showResults(const Complex* seq, double starttime, double endtime)
+{
+    if(0 == global::rank)
+    {
+        std::printf("\n");
+
+        for(int i = 1; i < global::input_size; i++)
+        {
+            std::printf("X[%d] : %f", i - 1, seq[i].real);
+
+            if(seq[i].img >= 0)
+            {
+                std::printf("+j%f\n", seq[i].img);
+            }
+            else
+            {
+                std::printf("-j%f\n", seq[i].img - 2 * seq[i].img);
+            }
+        }
+
+        std::printf("\n");
+        std::printf("Total Time : %lf ms\n", (endtime - starttime) * 1000);
+        std::printf("\n");
+    }
+}
+
+namespace logger
+{
+void master(const char* format, auto... args)
+{
+    if(global::rank == 0)
+    {
+        logger::all(format, args...);
+    }
+}
+
+void slave(const char* format, auto... args)
+{
+    if(global::rank != 0)
+    {
+        ::logger::all(format, args...);
+    }
+}
+
+void all(const char* format, auto... args)
 {
 #ifdef ENABLE_LOGGING
-    const auto rank_idx = not not rank;
+    const auto rank_idx = not not global::rank;
 
-    std::array<std::string, 2> thread_name = {"master", "slave(" + std::to_string(rank) + ")"};
+    std::array<std::string, 2> thread_name = {"master",
+        "slave(" + std::to_string(global::rank) + ")"};
 
     std::stringstream strstr;
     strstr << "LOG | " << thread_name[rank_idx] << " | " << format;
     std::printf(strstr.str().c_str(), args...);
 #endif
 }
+}  // namespace logger
