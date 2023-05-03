@@ -59,6 +59,7 @@ int main(int argc, char** argv)
     const double starttime = MPI_Wtime();
     for(int div = 1, key = std::log2f(global::input_size - 1); key > 0; key--, div *= 2)
     {
+        logger::master("ITERATION %d\n", static_cast<int>(std::log2f(div)));
         if(global::rank != 0)
         {
             using global::rank;
@@ -109,28 +110,29 @@ int main(int argc, char** argv)
         {
             logger::master("beginning receiving sequence... (count = %d)\n",
                 global::input_size - 1);
-            for(int i = 1; i <= global::input_size / values_per_process; i++)
+            for(int i = 0; i < global::slave_count; i++)
             {
+                const auto slave_id = i + 1;
                 for(int b = 0; b < values_per_process; b++)
                 {
-                    const auto b_i = (i - 1) * values_per_process + b + 1;
+                    const auto b_i = (i * values_per_process) + b + 1;
                     MPI_Recv(&seq_real[b_i],
                         1,
                         MPI_FLOAT,
-                        i,
+                        slave_id,
                         0 + values_per_process * b,
                         MPI_COMM_WORLD,
                         &global::mpi_status);
                     MPI_Recv(&seq_img[b_i],
                         1,
                         MPI_FLOAT,
-                        i,
+                        slave_id,
                         1 + values_per_process * b,
                         MPI_COMM_WORLD,
                         &global::mpi_status);
                     logger::master(
                         " -- received from slave %d: b_i = %d, tag_real = %d, tag_img = %d, status = %d, seq[b_i] = {%f, %f}\n",
-                        i,
+                        slave_id,
                         b_i,
                         0 + values_per_process * b,
                         1 + values_per_process * b,
@@ -139,7 +141,7 @@ int main(int argc, char** argv)
                         seq_img[b_i]);
                 }
             }
-            logger::master("finished receiving temps\n");
+            logger::master("finished receiving sequence\n");
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
