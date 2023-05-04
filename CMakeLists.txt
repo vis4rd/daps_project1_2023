@@ -58,7 +58,7 @@ add_custom_target(run
 
 add_executable(fft_sequential)
 set_target_properties(fft_sequential PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
-target_sources(fft_sequential PRIVATE "${PROJECT_SOURCE_DIR}/fft_sequential.c")
+target_sources(fft_sequential PRIVATE "${PROJECT_SOURCE_DIR}/fft_sequential.cpp")
 target_compile_features(fft_sequential PRIVATE c_std_23 cxx_std_20)
 target_link_libraries(fft_sequential PRIVATE m)
 
