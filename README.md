@@ -38,3 +38,7 @@ $ cmake -DENABLE_LOGGING=1 -DENABLE_ASAN=1 ..
 
 - [Aleksander Kluczka](https://github.com/vis4rd)
 - [Piotr Deda](https://github.com/PiotrDeda)
+
+### License
+
+This project is licensed under MIT, a free and open-source license. For more information, please see [the license file](LICENSE.md).
