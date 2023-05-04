@@ -239,24 +239,17 @@ void showResults(const float* seq_real, const float* seq_img, double starttime, 
     if(0 == global::rank)
     {
         std::printf("\n");
-
         for(int i = 1; i < global::input_size; i++)
         {
-            std::printf("X[%d] : %+6.2f", i - 1, seq_real[i]);
-
-            if(seq_img[i] >= 0)
-            {
-                std::printf(" + i%-6.2f\n", seq_img[i]);
-            }
-            else
-            {
-                std::printf(" - i%-6.2f\n", seq_img[i] - 2 * seq_img[i]);
-            }
+            const char img_sign = seq_img[i] >= 0 ? '+' : '-';
+            std::printf("X[%3d] = %6.2f %c i%-6.2f\n",
+                i,
+                seq_real[i],
+                img_sign,
+                std::fabs(seq_img[i]));
         }
 
-        std::printf("\n");
-        std::printf("Total Time : %lf ms\n", (endtime - starttime) * 1000);
-        std::printf("\n");
+        std::printf("\nParallel FFT computation time: %.4lf ms\n\n", (endtime - starttime) * 1000);
     }
 }
 
