@@ -72,12 +72,12 @@ int main(int argc, char** argv)
                 const auto is_odd = 1 - is_even;
                 const auto butterfly_index = M_PI * ((b_rank - 1) % (div * 2)) / div;
 
-                seq_real[b_rank] =
+                float temp_real =
                     seq_real[b_rank - (div * is_odd)]
                     + (std::cos(butterfly_index) * (seq_real[b_rank + (div * is_even)]))
                     + (std::sin(butterfly_index) * (seq_img[b_rank + (div * is_even)]));
 
-                seq_img[b_rank] =
+                float temp_img =
                     seq_img[b_rank - (div * is_odd)]
                     + (std::cos(butterfly_index) * (seq_img[b_rank + (div * is_even)]))
                     - (std::sin(butterfly_index) * (seq_real[b_rank + (div * is_even)]));
@@ -87,16 +87,16 @@ int main(int argc, char** argv)
                     b_rank,
                     0 + values_per_process * b,
                     1 + values_per_process * b,
-                    seq_real[b_rank],
-                    seq_img[b_rank]);
+                    temp_real,
+                    temp_img);
 
-                MPI_Send(&seq_real[b_rank],
+                MPI_Send(&temp_real,
                     1,
                     MPI_FLOAT,
                     0,
                     0 + values_per_process * b,
                     MPI_COMM_WORLD);
-                MPI_Send(&seq_img[b_rank],
+                MPI_Send(&temp_img,
                     1,
                     MPI_FLOAT,
                     0,
