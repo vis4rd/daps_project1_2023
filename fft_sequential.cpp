@@ -2,58 +2,81 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <fstream>
+#include <vector>
+
+namespace global
+{
+
+std::vector<float> input;
+int input_size{};
+
+}  // namespace global
+
+void initInputValues(const char*);
+void showResults(const std::vector<float>&, const std::vector<float>&, std::clock_t, std::clock_t);
 
 int main(int argc, char** argv)
 {
-    int num;
-    std::printf("Enter No. of input values(it should be in form of 2^x) : ");
-    std::scanf("%d", &num);
+    initInputValues("../res/input.txt");
 
-    float temp, input[num], result_real[num], result_img[num], sum = 0.0;
+    std::vector<float> result_real(global::input_size);
+    std::vector<float> result_img(global::input_size);
 
-    std::printf("Enter total %d values in floating point format(separated with space) : ", num);
+    std::clock_t starttime = std::clock();
 
-    for(int i = 0; i < num; i++)
+    for(int res = 0; res < global::input_size; res++)
     {
-        std::scanf("%f", &input[i]);
-    }
+        result_real[res] = 0.0;
+        result_img[res] = 0.0;
 
-    std::clock_t start = std::clock();
-
-    for(int k = 0; k < num; k++)
-    {
-        result_real[k] = 0.0;
-        result_img[k] = 0.0;
-
-        for(int n = 0; n < num; n++)
+        for(int inp = 0; inp < global::input_size; inp++)
         {
-            temp = -2 * M_PI * n * k / num;
-            result_real[k] = result_real[k] + (input[n] * std::cos(temp));
-            result_img[k] = result_img[k] + (input[n] * std::sin(temp));
+            const float temp = -2 * M_PI * inp * res / global::input_size;
+            result_real[res] += (global::input[inp] * std::cos(temp));
+            result_img[res] += (global::input[inp] * std::sin(temp));
         }
     }
 
-    std::clock_t end = std::clock();
-
-    std::printf("\n");
-
-    for(int k = 0; k < num; k++)
-    {
-        std::printf("X[%d] : %+6.2f", k, result_real[k]);
-        if(result_img[k] >= 0)
-        {
-            std::printf(" + i%-6.2f\n", result_img[k]);
-        }
-        else
-        {
-            std::printf(" - i%-6.2f\n", result_img[k] - 2 * result_img[k]);
-        }
-    }
-
-    std::printf("\n");
-
-    double cpu_time_used = ((double)(end - start)) / CLOCKS_PER_SEC;
-    std::printf("Time to compute FFT sequentially : %lf ms\n", cpu_time_used * 1000);
+    std::clock_t endtime = std::clock();
+    showResults(result_real, result_img, starttime, endtime);
 
     return 0;
+}
+
+void initInputValues(const char* path)
+{
+    std::ifstream file(path);
+    if(not file.is_open())
+    {
+        return;
+    }
+
+    float temp{};
+    while(file >> temp)
+    {
+        global::input.push_back(temp);
+    }
+    global::input_size = global::input.size();
+}
+
+void showResults(const std::vector<float>& result_real,
+    const std::vector<float>& result_img,
+    std::clock_t starttime,
+    std::clock_t endtime)
+{
+    std::printf("\n");
+    for(int result_iter = 0; result_iter < global::input_size; result_iter++)
+    {
+        const char img_sign = result_img[result_iter] >= 0 ? '+' : '-';
+        std::printf("X[%3d] = %6.2f %c i%-6.2f\n",
+            result_iter,
+            result_real[result_iter],
+            img_sign,
+            std::fabs(result_img[result_iter]));
+    }
+    std::printf("\n");
+
+    double cpu_time_used = (static_cast<double>(endtime - starttime)) / CLOCKS_PER_SEC;
+    std::printf("\nSequential FFT computation time: %.4lf ms\n\n", cpu_time_used * 1000);
 }
